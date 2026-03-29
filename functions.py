@@ -28,3 +28,11 @@ def create_mask(source_img):
         largest_contour = max(contours, key=cv2.contourArea)
         cv2.drawContours(final_mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
     return final_mask
+
+def get_color_line(epsilon, max_epsilon, min_epsilon):
+    if max_epsilon == min_epsilon:
+        return (0, 255, 0)
+    
+    ratio = (epsilon-min_epsilon)/(max_epsilon-min_epsilon)
+
+    return (0, int(255*(1-ratio)), int(255*ratio))

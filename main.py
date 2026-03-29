@@ -5,7 +5,7 @@ from scipy.spatial.distance import cdist
 from math import sqrt
 
 from classes import Point, Line
-from functions import create_mask
+from functions import create_mask, get_color_line
 
 cv2.namedWindow("video", cv2.WINDOW_NORMAL) 
 
@@ -25,12 +25,15 @@ points = []
 axis_sumM = []
 axis_points = []
 
-while cap.read()[0]:
+while True:
     ret , frame = cap.read()
    
     if not ret:
         break
     
+    if len(points) > 1000:
+        del points[0]
+
     frame_mask = cv2.bitwise_and(frame, frame, mask=create_mask(frame))
 
     hsv = cv2.cvtColor(frame_mask, cv2.COLOR_BGR2HSV)
@@ -117,24 +120,34 @@ while cap.read()[0]:
             new_line_point2 = next( (p for p in points_on_frame if p.id == line.point2.id) )
             len_first_line = line.len
             len_new_line = round(sqrt( (new_line_point2.x-new_line_point1.x)**2 + (new_line_point2.y-new_line_point1.y)**2 ), 4)
-            lines += [Line(new_line_point1, new_line_point2, round(len_new_line/len_first_line, 4) )]
+            lines += [Line(new_line_point1, new_line_point2, round( (len_new_line - len_first_line)/len_first_line, 4) )]
 
-    
-    # отрисовка линий на кадре
-    for line in lines:
-        cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0,255,0), 3, cv2.LINE_AA)
-    
-    # отрисовка занчения удлинения для линий
+    # отрисовка линий на кадре с разными цветами в зависимости от эпсилон
     if not lines:
+        for line in first_lines:
+            cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0, 255, 0), 3, cv2.LINE_AA)
+    else:
+        sorted_lines = sorted(lines, key=lambda line: line.epsilon)
+        min_epsilon = sorted_lines[0].epsilon
+        max_epsilon = sorted_lines[len(sorted_lines)-1].epsilon
+        for line in sorted_lines:
+            cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), get_color_line(line.epsilon, max_epsilon, min_epsilon), 3, cv2.LINE_AA)
+
+    # отрисовка линий на кадре
+    """for line in lines:
+        cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0,255,0), 3, cv2.LINE_AA)"""
+    
+    # отрисовка значения удлинения для линий
+    """if not lines:
         for line in first_lines:
             cv2.putText(frame, str(line.epsilon), ( int((line.x1+line.x2)/2) , int((line.y1+line.y2)/2 )), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
     else:
         for line in lines:
-            cv2.putText(frame, str(line.epsilon), ( int((line.x1+line.x2)/2) , int((line.y1+line.y2)/2 )), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+            cv2.putText(frame, str(line.epsilon), ( int((line.x1+line.x2)/2) , int((line.y1+line.y2)/2 )), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)"""
     
     # отрисовываем id на кадре
-    for p in points_on_frame:
-        cv2.putText(frame, str(p.id), (p.x, p.y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+    """for p in points_on_frame:
+        cv2.putText(frame, str(p.id), (p.x, p.y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)"""
         
     points += [points_on_frame]
     
@@ -153,6 +166,8 @@ plt.subplot(2,1,1)
 plt.plot(axis_frame, axis_sumM)
 plt.subplot(2,1,2)
 plt.plot(axis_frame, axis_points)
+
+video_writer.release()
 cap.release()
 cv2.waitKey(0)
 cv2.destroyAllWindows()
