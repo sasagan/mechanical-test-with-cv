@@ -31,7 +31,7 @@ while True:
     if not ret:
         break
     
-    if len(points) > 1000:
+    if len(points) > 10:
         del points[0]
 
     frame_mask = cv2.bitwise_and(frame, frame, mask=create_mask(frame))
@@ -52,10 +52,8 @@ while True:
     thresh[:, 1020:1920] = 0
 
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    sumM = 0
 
-    points_on_frame = []
+    points_on_frame = {}
     
     # находим точки и присваиваем им индивидуальный id
     for cnt in contours:
@@ -68,59 +66,66 @@ while True:
 
             if not points: # елси список всех точек пуст
                 if not points_on_frame: # если список точек на текущем кадре пуст
-                    points_on_frame += [Point(1, cx, cy)]
+                    points_on_frame[1] = Point(1, cx, cy)
                 else:
-                    points_on_frame += [Point( max(point.id for point in points_on_frame) + 1, cx, cy)]
+                    points_on_frame[max(points_on_frame)+1] = Point( max(points_on_frame)+1, cx, cy) 
             else: # если список всех точек НЕ пуст
                 flag_point_exist_in_points = 0
 
-                for point_frame in reversed(points): # перебираем точки из последнего элемта списка всех точек
-                    for point in point_frame:
-                        if np.abs(point.x-cx) < 5 and np.abs(point.y-cy) < 5:
-                            points_on_frame += [Point( point.id, cx, cy )]
+                for point_frame in reversed(points):
+                    if flag_point_exist_in_points == 1:
+                        break
+                    for key_point in point_frame:
+                        if np.abs(point_frame[key_point].x-cx) < 5 and np.abs(point_frame[key_point].y-cy) < 5:
+                            points_on_frame[key_point] = Point( key_point, cx, cy )
                             flag_point_exist_in_points = 1
                             break
 
-                    if flag_point_exist_in_points == 1:
-                        break
-
                 if flag_point_exist_in_points == 0:
-                    max_point = max(point.id for points[1] in points for point in points[1])
-                    if max_point < 33:
-                        points_on_frame += [Point( max(point.id for points[1] in points for point in points[1]) + 1, cx, cy)]
+                    if len(points[1]) < 33:
+                        points_on_frame += [Point( max(points[1]) + 1, cx, cy)]
                         
-            sumM +=  M['m00']
     if points:
         if len(points[len(points)-1]) != len(points_on_frame):
             print('min points')
-            for point in reversed(points[len(points)-1]):
+            for key_point in reversed(points[len(points)-1]):
                 try:
-                    current_point = next( (p for p in points_on_frame if p.id == point.id) )
+                    current_point = points_on_frame[key_point]
+                  #  current_point = next( (p for p in points_on_frame if p.id == point.id) )
                 #index, current_point = next( ((i, p) for i, p in enumerate(points_on_frame) if p.id == point.id) )
                 except:
-                    points_on_frame += [point]
+                    points_on_frame[key_point] = points[len(points)-1][key_point]
                     print('added point')
 
     # линии связи между точками
     lines = []
-    np_coord_points = np.array([[p.x, p.y] for p in points_on_frame])
+    list_points_on_frame = list(points_on_frame.values())
+    np_coord_points = np.array([[p.x, p.y] for p in list_points_on_frame])
     try:
         distances = cdist(np_coord_points, np_coord_points, metric='euclidean')
     except:
         print(len(np_coord_points), np_coord_points)
     if not points:
         first_lines = []
-        for i in range(len(points_on_frame)):
-            for j in range(i+1, len(points_on_frame)):
+        for i in range(len(list_points_on_frame)):
+            for j in range(i+1, len(list_points_on_frame)):
                 if distances[i][j] < 55:
-                    first_lines += [Line(points_on_frame[i], points_on_frame[j])]
+                    first_lines += [Line(list_points_on_frame[i], list_points_on_frame[j])]
+
+
+        """for i in range(len(list_points_on_frame)):
+            for j in range(i+1, len(list_points_on_frame)):
+                if distances[i][j] < 55:
+                    first_lines += [Line(list_points_on_frame[i], list_points_on_frame[j])]
+    """
     else:
         for line in first_lines:
-            new_line_point1 = next( (p for p in points_on_frame if p.id == line.point1.id) )
-            new_line_point2 = next( (p for p in points_on_frame if p.id == line.point2.id) )
+            new_line_point1 = points_on_frame[line.point1.id]
+            new_line_point2 = points_on_frame[line.point2.id]
+
             len_first_line = line.len
-            len_new_line = round(sqrt( (new_line_point2.x-new_line_point1.x)**2 + (new_line_point2.y-new_line_point1.y)**2 ), 4)
-            lines += [Line(new_line_point1, new_line_point2, round( (len_new_line - len_first_line)/len_first_line, 4) )]
+            len_new_line = round(sqrt( (new_line_point2.x-new_line_point1.x)**2 + (new_line_point2.y-new_line_point1.y)**2 ), 2)
+            lines += [Line(new_line_point1, new_line_point2, round( (len_new_line - len_first_line)/len_first_line, 2) )]
 
     # отрисовка линий на кадре с разными цветами в зависимости от эпсилон
     if not lines:
@@ -132,11 +137,11 @@ while True:
         max_epsilon = sorted_lines[len(sorted_lines)-1].epsilon
         for line in sorted_lines:
             cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), get_color_line(line.epsilon, max_epsilon, min_epsilon), 3, cv2.LINE_AA)
-
+    
     # отрисовка линий на кадре
     """for line in lines:
-        cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0,255,0), 3, cv2.LINE_AA)"""
-    
+        cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0,255,0), 3, cv2.LINE_AA)
+    """
     # отрисовка значения удлинения для линий
     """if not lines:
         for line in first_lines:
@@ -146,26 +151,17 @@ while True:
             cv2.putText(frame, str(line.epsilon), ( int((line.x1+line.x2)/2) , int((line.y1+line.y2)/2 )), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)"""
     
     # отрисовываем id на кадре
-    """for p in points_on_frame:
-        cv2.putText(frame, str(p.id), (p.x, p.y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)"""
-        
+    """for key_p in points_on_frame:
+        cv2.putText(frame, str(key_p), (points_on_frame[key_p].x, points_on_frame[key_p].y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+    """    
     points += [points_on_frame]
-    
-    axis_sumM += [sumM]
-    axis_points += [len(points_on_frame)]
-    
-    video_writer.write(frame)  #сохраняем новые кадры в видеофайл (не работает)
+       
+    video_writer.write(frame)  #сохраняем новые кадры в видеофайл
     
     #cv2.imshow('video', cv2.drawContours(thresh , contours, -1, (0, 255, 0), 2)) 
     cv2.imshow('video', frame) 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
-
-axis_frame = [i for i in range(0, len(axis_sumM))]
-plt.subplot(2,1,1)
-plt.plot(axis_frame, axis_sumM)
-plt.subplot(2,1,2)
-plt.plot(axis_frame, axis_points)
 
 video_writer.release()
 cap.release()
