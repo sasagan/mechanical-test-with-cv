@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import cv2
 import numpy as np
 from scipy.spatial.distance import cdist
+from scipy.interpolate import griddata
 from math import sqrt
 
 from classes import Point, Line
@@ -24,6 +25,8 @@ points = []
 
 axis_sumM = []
 axis_points = []
+x_min, x_max, y_min, y_max = None, None,None,None
+smooth_values_epsilon = None
 
 while True:
     ret , frame = cap.read()
@@ -109,7 +112,7 @@ while True:
         first_lines = []
         for i in range(len(list_points_on_frame)):
             for j in range(i+1, len(list_points_on_frame)):
-                if distances[i][j] < 55:
+                if distances[i][j] < 90:
                     first_lines += [Line(list_points_on_frame[i], list_points_on_frame[j])]
 
 
@@ -127,8 +130,62 @@ while True:
             len_new_line = round(sqrt( (new_line_point2.x-new_line_point1.x)**2 + (new_line_point2.y-new_line_point1.y)**2 ), 2)
             lines += [Line(new_line_point1, new_line_point2, round( (len_new_line - len_first_line)/len_first_line, 2) )]
 
-    # отрисовка линий на кадре с разными цветами в зависимости от эпсилон
+    # интерполяция для создания тепловых карт
     if not lines:
+        line_center_points = [ Point(first_lines.index(line) , int((line.point1.x+line.point2.x)/2), int((line.point1.y+line.point2.y)/2), line.epsilon ) for line in first_lines]
+    else:
+        line_center_points = [ Point(lines.index(line) , int((line.point1.x+line.point2.x)/2), int((line.point1.y+line.point2.y)/2), line.epsilon ) for line in lines]
+    
+    coords = np.array([[p.x, p.y] for p in line_center_points])
+    values_epsilon = np.array([p.epsilon for p in line_center_points])
+    if smooth_values_epsilon is None:
+        smooth_values_epsilon = values_epsilon.copy()
+
+    if not (x_min and x_max and y_min and y_max):
+        x_min, x_max = int(min(coords[:,0])-10), int(max(coords[:,0])+10)
+        y_min, y_max = int(min(coords[:,1])-10), int(max(coords[:,1])+10)
+
+    grid_x, grid_y = np.mgrid[x_min:x_max:200j, y_min:y_max:200j]
+
+    # фильрация дребезжания цвета 
+
+    alpha = 0.2 
+    smooth_values_epsilon = alpha * values_epsilon + (1 - alpha) * smooth_values_epsilon
+
+    grid_z = griddata(coords, smooth_values_epsilon, (grid_x, grid_y), method='linear')
+    grid_z = np.nan_to_num(grid_z)
+
+    # фиксация шкалы
+    min_epsilon = 0.0   # 0 деформации — синий
+    max_epsilon = 0.3   # красный
+
+    # значения в диапазон min_epsilon  max_epsilon
+    grid_z_clipped = np.clip(grid_z, min_epsilon, max_epsilon)
+
+    # пересчитываем в 0-255 (значение / V_MAX) * 255
+    heatmap_norm = ((grid_z_clipped - min_epsilon) / (max_epsilon - min_epsilon) * 255).astype(np.uint8)
+
+    heatmap_norm = heatmap_norm.T
+    heatmap_color = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
+
+    heatmap_resied = cv2.resize(heatmap_color, (x_max - x_min, y_max - y_min), interpolation=cv2.INTER_CUBIC)
+
+    roi = frame[y_min:y_max, x_min:x_max]
+    overlay = cv2.addWeighted(roi, 0.5, heatmap_resied, 0.5, 0)
+    frame[y_min:y_max, x_min:x_max] = overlay
+
+
+    """# проверка точек центров линий 
+    print([point.epsilon for point in line_center_points])
+    sorted_line_center_points = sorted(line_center_points, key=lambda point: point.epsilon)
+    min_epsilon = sorted_line_center_points[0].epsilon
+    max_epsilon = sorted_line_center_points[len(sorted_line_center_points)-1].epsilon
+    for point in line_center_points:
+        cv2.circle(frame, (point.x, point.y), 3, get_color_line(point.epsilon, max_epsilon, min_epsilon), -1)"""
+        
+
+    # отрисовка линий на кадре с разными цветами в зависимости от эпсилон
+    """if not lines:
         for line in first_lines:
             cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0, 255, 0), 3, cv2.LINE_AA)
     else:
@@ -137,7 +194,7 @@ while True:
         max_epsilon = sorted_lines[len(sorted_lines)-1].epsilon
         for line in sorted_lines:
             cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), get_color_line(line.epsilon, max_epsilon, min_epsilon), 3, cv2.LINE_AA)
-    
+    """
     # отрисовка линий на кадре
     """for line in lines:
         cv2.line(frame, (line.x1, line.y1), (line.x2, line.y2), (0,255,0), 3, cv2.LINE_AA)
@@ -155,7 +212,7 @@ while True:
         cv2.putText(frame, str(key_p), (points_on_frame[key_p].x, points_on_frame[key_p].y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
     """    
     points += [points_on_frame]
-       
+
     video_writer.write(frame)  #сохраняем новые кадры в видеофайл
     
     #cv2.imshow('video', cv2.drawContours(thresh , contours, -1, (0, 255, 0), 2)) 
